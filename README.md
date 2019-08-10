@@ -1,0 +1,1 @@
+A simple implementation of deformable convolutions with PyTorch `grid_sample`.
