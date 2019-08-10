@@ -2,6 +2,8 @@ from torch import nn
 from torch.nn.functional import grid_sample
 from dpipe.layers import Reshape
 from dpipe.torch.utils import to_var, is_on_cuda
+from defconv.utils import moveaxis
+
 import numpy as np
 
 
@@ -11,12 +13,12 @@ class DefConv(nn.Conv2d):
 
         self.filters = filters
 
-        self.weight.data.copy_(self._init_weights(self.weight, init_normal_stddev))
+        self.weight.data.normal_(0., init_normal_stddev)
 
-        self.reshape_bc_offset = Reshape(-1, '2', '3', 2)
-        self.reshape_bc_x = Reshape(-1, '2', '3')
+        self.reshape_bc_offset = Reshape(-1, 2, '2', '3')
+        self.reshape_bc_x = Reshape(-1, 1, '2', '3')
 
-        self.reshape_back = Reshape(-1, self.filters, '1', '2')
+        self.reshape_back = Reshape(-1, self.filters, '2', '3')
 
     def identity_mapping(self, shape, normalize=True):
         grid = np.mgrid[tuple(map(slice, shape))].astype('float32')
@@ -30,27 +32,29 @@ class DefConv(nn.Conv2d):
     def _get_grid(self, shape):
 
         if not hasattr(self, 'grid'):
-            self.grid = self.identity_mapping(shape)
+            self.grid = self.identity_mapping(np.array(shape[2:]))
 
-        return self.grid
+        return self.grid.expand(self.filters, 2, *shape[2:])
 
     def _bilinear_grid_sample(self, image, grid):
+
+        grid = moveaxis(grid, 1, -1)
+
         grid = grid.flip(-1)
         return grid_sample(image, grid)
 
     def forward(self, x):
-        x_shape = x.size()
+        x_shape = tuple(x.size())
         offsets = super(DefConv, self).forward(x)
 
         # offsets: (b*c, h, w, 2)
-        offsets = self._to_bc_h_w_2(offsets, x_shape)
         offsets = self.reshape_bc_offset(offsets)
 
         # x: (b*c, h, w)
-        x = self.reshape_bc_x(x, x_shape)
+        x = self.reshape_bc_x(x)
 
-        # X_offset: (b*c, h, w)
-        x_offset = self._bilinear_grid_sample(x, self._get_grid(self, x_shape[2:]) + offsets)
+        # x_offset: (b*c, h, w)
+        x_offset = self._bilinear_grid_sample(x, self._get_grid(x_shape) + offsets)
 
         # x_offset: (b, h, w, c)
         x_offset = self.reshape_back(x_offset)
