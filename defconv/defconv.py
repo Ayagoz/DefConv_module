@@ -34,7 +34,7 @@ class DefConv(nn.Conv2d):
         if not hasattr(self, 'grid'):
             self.grid = self.identity_mapping(np.array(shape[2:]))
 
-        return self.grid.expand(self.filters, 2, *shape[2:])
+        return self.grid.expand(self.filters * shape[0], 2, *shape[2:])
 
     def _bilinear_grid_sample(self, image, grid):
 
